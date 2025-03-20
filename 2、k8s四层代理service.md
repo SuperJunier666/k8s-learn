@@ -22,7 +22,7 @@
 
 <img src="./k8s/image-20250319145302021.png" alt="image-20250319145302021" style="zoom:80%;" />
 
-<img src="C:\Users\yxc\Desktop\k8s\image-20250319145500760.png" alt="image-20250319145500760" style="zoom:67%;" />
+<img src="./k8s/image-20250319145500760.png" alt="image-20250319145500760" style="zoom:67%;" />
 
 **为什么不直接请求 Pod的ip?而是要创建 Service?**
 1.Pod IP可能变化，直接访问Pod IP风险高。 
@@ -116,7 +116,7 @@ Kubernetes 中的 Service 类型定义了不同的访问方式和应用场景。
 
 **nodePort**: 该字段仅在 NodePort 类型的 Service 中可选。它用于指定在每个节点上公开的端口号。如果未指定，Kubernetes将自动分配一个端口号。
 
-![image-20250320154904824](./k8s\image-20250320154904824.png)
+![image-20250320154904824](./k8s/image-20250320154904824.png)
 
 **service完整的DNS名字：Service_name.svc_namespace.svc.cluster.local**
 
