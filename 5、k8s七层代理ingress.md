@@ -15,13 +15,14 @@
    当您创建一个 `Service` 对象时，Kubernetes 会为它分配一个稳定的 Cluster IP（集群内部 IP 地址）。`kube-proxy` 组件在每个节点上监听 `Service` 和 `Endpoints` 对象的变化。
 
    - `Endpoints` 对象：由 Kubernetes 自动创建和管理，它包含了 `Service` 所代理的所有后端 Pods 的 IP 地址和端口信息。
-
    - `kube-proxy` 根据 `Service` 和 `Endpoints` 的信息，在节点上配置网络规则（通常是 `iptables` 或 `IPVS`）。当有流量发送到 `Service` 的 Cluster IP 和端口时，这些规则会将流量转发到 `Endpoints` 中列出的某个后端 Pod。
-
+   
+   ![](./k8s/image-20250627104653599.png)
+   
    1.2. **Service 的类型：**
-
+   
    ​	Kubernetes 的`Service` 支持几种不同的类型，以适应不同的负载均衡需求：
-
+   
      - **ClusterIP（默认）**: 这是最常见的 Service 类型。它为 Service 分配一个集群内部的 IP 地址。Service 只能从集群内部访问。通常用于集群内部服务间的通信。
        - **示例场景**: 微服务之间相互调用。
      - **NodePort**: 在每个节点上暴露一个静态端口（NodePort）。外部流量可以通过 `NodeIP:NodePort` 访问 Service。
@@ -30,7 +31,7 @@
        - **示例场景**: 将 Web 应用暴露给外部用户。
      - **ExternalName**: 将 Service 映射到 DNS 名称，而不是 IP 地址。它不涉及代理，只是返回一个 CNAME 记录。
        - **示例场景**: 内部服务需要访问外部数据库或服务。
-
+   
    | Service 类型                 | 是否暴露到集群外 | 访问方式                             | 使用场景                       | 特点说明                             |
    | ---------------------------- | ---------------- | ------------------------------------ | ------------------------------ | ------------------------------------ |
    | **ClusterIP（默认）**        | ❌ 否             | 仅集群内：`ClusterIP:Port`           | Pod 之间通信、微服务内部调用   | 默认类型，不对外提供服务             |
@@ -65,7 +66,7 @@
    
    **Kubernetes 中的实现**: 主要通过 `Ingress` 和 `Ingress Controller` 实现。
 
-
+![image-20250627111824613](./k8s/image-20250627111824613.png)
 
 ### 2. 四层和七层负载均衡区别:
 
@@ -123,7 +124,7 @@ OSl七层模型:
   3. 当检测到变化时，`Ingress Controller` 根据 `Ingress` 规则动态配置其内部的负载均衡器（例如 Nginx、HAProxy、Envoy 等）。
   4. 外部流量到达 `Ingress Controller`，`Ingress Controller` 根据配置的规则将流量路由到相应的后端 `Service`，再由 `Service` 将流量转发到具体的 Pod。
 
-  ![image-20250627111824613](./k8s/image-20250627111824613.png)
+  
 
 ```yaml
 apiVersion: networking.k8s.io/v1
