@@ -99,7 +99,7 @@ Prometheus 的组件：
 
    
 
-### 2. 安装采集节点资源指标组件node-exporter 
+### 2. 安装Prometheus组件
 
 node-exporter 官方网站：https://prometheus.io/docs/guides/node-exporter/
 node-exporter 的 github 地址：https://github.com/prometheus/node-exporter/
@@ -108,7 +108,7 @@ node-exporter 的 github 地址：https://github.com/prometheus/node-exporter/
 
 Node Exporter 是Prometheus 的一个官方 Exporter，用于收集和暴露有关操作系统和硬件资源的指标数据。它在目标主机上运行，并提供了各种系统级别的指标，例如CPU利用率、内存使用情况、磁盘空间、网络流量等。
 
-#### 2.2 通过Prometheus Operator 安装node-exporter 
+#### 2.2 通过Prometheus Operator 安装
 
 Prometheus Operator 是在 Kubernetes 上高效运行和管理 Prometheus 监控系统的**最佳实践和工具**。自动化了在 Kubernetes 上**部署、管理和运行 Prometheus、Alertmanager 和相关的监控组件**。
 
@@ -125,9 +125,19 @@ helm repo add prometheus-community https://prometheus-community.github.io/helm-c
 helm repo update
 ```
 
+查看
+
+```sh
+helm show chart prometheus-community/prometheus
+# 或
+helm show chart prometheus-community/kube-prometheus-stack
+```
+
 #### 2. 安装 kube-prometheus-stack
 
-使用 Helm 来安装 `kube-prometheus-stack`，首先创建一个命名空间
+使用 Helm 来安装 `kube-prometheus-stack`， `kube-prometheus-stack`相比`prometheus`默认启用多了Grafana和Prometheus Operator，其中Prometheus Operator作为Kubernetes Operator，管理Prometheus和Alertmanager实例的生命周期
+
+首先创建一个命名空间
 
 ```sh
 kubectl create namespace monitoring
@@ -142,8 +152,206 @@ kubectl create namespace monitoring
 - Node Exporter (用于收集节点指标，作为 DaemonSet 部署)
 - 以及所有必要的 Kubernetes RBAC 规则、Custom Resource Definitions (CRDs) 等
 
+```sh
+helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring  --create-namespace 
 ```
-helm install prometheus prometheus-community/kube-prometheus-stack --namespace monitoring
+
+如果网络不通，就下载到本地再进行安装
+
+```sh
+helm install prometheus-stack ./kube-prometheus-stack-75.6.1.tgz  -n monitoring --create-namespace -f Prometheus-values.yaml
+```
+
+其中yaml文件如下
+
+```yaml
+grafana:
+  enabled: true
+  adminPassword: admin
+  service:
+    type: NodePort
+    nodePort: 30030
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+  resources:
+    requests:
+      memory: "200Mi"
+      cpu: "100m"
+    limits:
+      memory: "500Mi"
+      cpu: "300m"
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: local-monitor-storage
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+
+prometheus:
+  service:
+    type: NodePort
+    nodePort: 30090
+  prometheusSpec:
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: ""
+    tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+    retention: "3d"
+    resources:
+      requests:
+        memory: "500Mi"
+        cpu: "250m"
+      limits:
+        memory: "1Gi"
+        cpu: "500m"
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-monitor-storage 
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi 
+
+alertmanager:
+  service:
+    type: NodePort
+    nodePort: 30093
+  alertmanagerSpec:
+    nodeSelector:
+      node-role.kubernetes.io/control-plane: ""
+    tolerations:
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+    resources:
+      requests:
+        memory: "100Mi"
+        cpu: "50m"
+      limits:
+        memory: "300Mi"
+        cpu: "200m"
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-monitor-storage 
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+prometheusOperator:
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+
+kubeStateMetrics:
+  nodeSelector:
+     kubernetes.io/hostname: k8s-master
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+
+nodeExporter:
+  # 每个节点都部署，不限制在哪个节点
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+```
+
+使用本地local--storage，标识我们的本地存储
+
+
+
+```yaml
+
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-monitor-storage
+provisioner: kubernetes.io/no-provisioner 
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: grafana-pv
+spec:
+  capacity:
+    storage: 5Gi 
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain 
+  storageClassName: local-monitor-storage 
+  local:
+    path: /data/monitor_data/grafana 
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: In
+          values:
+          - ""
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: prometheus-pv
+spec:
+  capacity:
+    storage: 10Gi 
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-monitor-storage
+  local:
+    path: /data/monitor_data/prometheus 
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: In
+          values:
+          - ""
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: alertmanager-pv
+spec:
+  capacity:
+    storage: 5Gi 
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-monitor-storage
+  local:
+    path: /data/monitor_data/alertmanager 
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: In
+          values:
+          - ""
 ```
 
 验证部署，检查 `monitoring` 命名空间下的 Pod 和 Service：
@@ -155,39 +363,29 @@ kubectl get prometheus -n monitoring # 检查 Prometheus CRD 实例
 kubectl get alertmanager -n monitoring # 检查 Alertmanager CRD 实例
 ```
 
-访问 Prometheus 和 Alertmanager UI，默认情况下，这些服务是 `ClusterIP` 类型，只能在集群内部访问。要从本地访问，可以使用 `kubectl port-forward`。
+### ✅ 对应访问地址说明：
 
-a. 访问 Prometheus UI ，执行下命名，然后，在浏览器中访问 `http://localhost:9090`
+如果部署在云服务器，那么外部访问地址为：
 
-```sh
-kubectl port-forward svc/prometheus-kube-prometheus-s-prometheus 9090:9090 -n monitoring
-```
-
-b. 访问 Alertmanager UI，执行下命名然后，在浏览器中访问 `http://localhost:9093`
-
-```sh
-kubectl port-forward svc/prometheus-kube-prometheus-s-alertmanager 9093:9093 -n monitoring
-```
-
-c. 访问 Grafana UI (推荐)
-
-```sh
-kubectl port-forward svc/prometheus-grafana 3000:80 -n monitoring
-```
-
-然后，在浏览器中访问 `http://localhost:3000`。
-
-- 默认的 Grafana 用户名是 `admin`。
-- 默认密码通常会存储在一个 Kubernetes Secret 中。你可以通过以下命令获取：
+- **Prometheus**：`http://IP:30090`
+- **Alertmanager**：`http://IP:30093`
+- **Grafana**：`http://IP:30030`
+  - 默认的 Grafana 用户名是 `admin`。
+  - 默认密码通常会存储在一个 Kubernetes Secret 中。你可以通过以下命令获取：
 
 ```sh
 kubectl get secret prometheus-grafana -n monitoring -o jsonpath="{.data.admin-password}" | base64 --decode
 ```
 
+使用一下命名查看安装情况
 
+```sh
+helm list -n monitoring
+```
 
-### 3. 在k8s 集群中安装 Prometheus server 服务
+如需重新安装，需要卸载
 
-### 4. 安装和配置可视化 Ul界面 Grafana
+```sh
+helm uninstall prometheus-stack -n monitoring
+```
 
-### 5. kube-state-metrics 组件解读
