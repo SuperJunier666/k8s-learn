@@ -14,7 +14,6 @@
 - [Kubernetes 官方文档](https://kubernetes.io/zh/docs/)
 - [Kubernetes Up & Running（O'Reilly）](https://www.oreilly.com/library/view/kubernetes-up-and/9781491935675/)
 - [Prometheus 官方文档](https://prometheus.io/docs/introduction/overview/)
-- [Katacoda Kubernetes 互动教程](https://www.katacoda.com/courses/kubernetes)
 
 ---
 
