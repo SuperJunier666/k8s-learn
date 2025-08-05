@@ -114,17 +114,17 @@ Kubernetes 基于 Docker 容器编排，通过不可变镜像确保多环境一�
 
 ### 4、Devops流水线----搭建Harbor
 
-创建一台新的虚拟机，内网ip为10.1.20.2，命名为harbor.cn
+创建一台新的虚拟机，内网ip为10.1.12.10，命名为harbor.cn
 
 **Harbor** 是一个由 VMware 开源的**企业级容器镜像仓库**，它是在 Docker Registry 基础上增强的解决方案，用于**存储、管理、扫描、签名容器镜像和 Helm Chart**，并提供完整的用户权限控制和审计能力。**强烈建议将 Harbor 作为独立服务部署在一台物理机或专属虚拟机上**，并定期做数据备份。
 
 #### 4.1 关闭 SELinux和防火墙
 
 ```sh
-bash复制编辑# 临时关闭
+# 临时关闭
 sudo setenforce 0
 # 永久关闭（需重启）
-sudo vi /etc/selinux/config
+sudo vim /etc/selinux/config
 SELINUX=disabled
 # 关闭防火墙
 systemctl stop firewalld && systemctl disable firewalld
@@ -142,7 +142,7 @@ yum-config-manager --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/d
 ```sh
 yum install chrony -y
 #配置时间同步服务器
-vi /etc/chrony.conf
+vim /etc/chrony.conf
 #添加 NTP 服务器地，改为阿里云 NTP（或你的内网NTP）
 server ntp.aliyun.com iburst
 ```
@@ -185,7 +185,7 @@ vim /etc/hosts
 ```sh
 10.1.20.3 k8s-master
 10.1.20.14 k8s-worker
-10.1.20.2 harbor.cn
+10.1.12.10 harbor.cn
 ```
 
 ##### 4.5.2 配置免密
@@ -194,9 +194,9 @@ vim /etc/hosts
 # 生成没有密码的密钥对
 ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N ""
 # 复制到远程
-ssh-copy-id root@10.1.20.2
+ssh-copy-id root@10.1.12.10
 # 测试是否免密登录成功
-ssh root@10.1.20.2
+ssh root@10.1.12.10
 ```
 
 ##### 4.5.3 为 Harbor 自签发证书
@@ -208,11 +208,17 @@ cd /data/cert
 #生成私钥和证书请求（CSR）
 openssl genrsa -out ca.key 3072
 openssl req -new -x509 -days 3650 -key ca.key -out ca.pem
+```
+
+<img src="./k8s/image-20250805163316432.png" alt="image-20250805163316432" style="zoom:80%;" />
+
+```sh
 #生成 Harbor 的私钥和证书请求（CSR）
 openssl genrsa -out harbor.key 3072
 openssl req -new -key harbor.key -out harbor.csr 
-
 ```
+
+<img src="./k8s/image-20250805163344698.png" alt="image-20250805163344698" style="zoom:80%;" />
 
 ##### 4.5.4 Docker 安装
 
@@ -243,7 +249,7 @@ vim /etc/docker/daemon.json
     "https://docker.1ms.run"
   ],
   "insecure-registries": [
-    "10.1.20.2",
+    "10.1.12.10",
     "harbor.cn"
   ]
 }
