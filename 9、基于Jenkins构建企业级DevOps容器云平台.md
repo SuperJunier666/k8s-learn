@@ -210,7 +210,7 @@ openssl genrsa -out ca.key 3072
 openssl req -new -x509 -days 3650 -key ca.key -out ca.pem
 ```
 
-<img src="./k8s/image-20250805163316432.png" alt="image-20250805163316432" style="zoom:80%;" />
+<img src="./k8s/image-20250805170000212.png" alt="image-20250805170000212" style="zoom:80%;" />
 
 ```sh
 #生成 Harbor 的私钥和证书请求（CSR）
@@ -218,7 +218,9 @@ openssl genrsa -out harbor.key 3072
 openssl req -new -key harbor.key -out harbor.csr 
 ```
 
-<img src="./k8s/image-20250805163344698.png" alt="image-20250805163344698" style="zoom:80%;" />
+<img src="./k8s/image-20250805170117182.png" alt="image-20250805170117182" style="zoom:80%;" />
+
+Common Name (CN) 不能乱写！
 
 ##### 4.5.4 Docker 安装
 
