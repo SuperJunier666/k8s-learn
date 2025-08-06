@@ -216,6 +216,7 @@ openssl req -new -x509 -days 3650 -key ca.key -out ca.pem
 #生成 Harbor 的私钥和证书请求（CSR）
 openssl genrsa -out harbor.key 3072
 openssl req -new -key harbor.key -out harbor.csr 
+openssl x509 -req -days 3650 -in harbor.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out harbor.pem
 ```
 
 <img src="./k8s/image-20250805170117182.png" alt="image-20250805170117182" style="zoom:80%;" />
@@ -228,7 +229,7 @@ Common Name (CN) 不能乱写！
 # 安装 Docker CE（社区版），-y 表示自动确认
 yum install docker-ce -y
 # 启动 Docker 服务并设置为开机自启
-systemctl start docker && systemctl enable docke
+systemctl start docker && systemctl enable docker
 ```
 
 配置 Docker 镜像加速器
@@ -280,8 +281,8 @@ chmod +x /usr/local/bin/docker-compose
 下载 Harbor 安装包
 
 ```sh
-wget https://github.com/goharbor/harbor/releases/download/v2.10.0/harbor-offline-installer-v2.10.0.tgz
-tar -zxvf harbor-offline-installer-v2.10.0.tgz
+wget https://github.com/goharbor/harbor/releases/download/v2.13.2/harbor-offline-installer-v2.13.2.tgz
+tar -zxvf harbor-offline-installer-v2.13.2.tgz
 cd harbor
 ```
 
@@ -304,20 +305,42 @@ vim harbor.yml
 验证服务
 
 - 浏览器访问 `https://harbor.cn`（或你的主机 IP）
-- 默认账号：admin，密码是你配置的（如 123456）
+- 默认账号：admin，密码是你配置的（如 Harbor12345）
+
+```sh
+#如何停掉harbor
+cd /root/harbor
+docker-compose stop
+#如何启动harbor:
+cd /root/harbor
+docker-compose up -d
+```
+
+
 
 #### 4.6 在k8s节点上测试使用 harbor 镜像仓库
 
 在节点的`/etc/docker/daemon.json`下添加以下内容，如果为k8s容器进行时为containerd则不用修改
 
-```
+```yaml
 "insecure-registries": [
     "10.1.20.2",
     "harbor.cn"
   ]
 ```
 
+或在10.1.20.2本机测试，
 
+```sh
+#首先登录 输入用户名和密码
+docker login harbor.cn
+#修改镜像标签
+docker tag SOURCE_IMAGE[:TAG] harbor.cn/library/REPOSITORY[:TAG]
+#推送至harbor
+docker push harbor.cn/library/REPOSITORY[:TAG]
+```
+
+<img src="./k8s/image-20250806105250280.png" alt="image-20250806105250280" style="zoom: 67%;" />
 
 ### 5、Jenkins+k8s+Git 构建企业级 DevOps 自动化容器云平台
 
@@ -325,7 +348,7 @@ vim harbor.yml
 
 可用如下两种方法：
 - 通过 docker 直接下载jenkins 镜像，基于镜像启动服务
-- 在 k8s 中部署 Jenkins 服务
+- 在 k8s 中部署 Jenkins 服务（本次使用）
 
 #### 5.2 安装nfs
 
@@ -366,7 +389,7 @@ spec:
   accessModes:
     - ReadWriteMany
   nfs:
-    server: 10.1.20.3 NFS服务端ip
+    server: 10.1.12.10 NFS服务端ip
     path: /data/nfs
 ```
 
@@ -388,13 +411,23 @@ spec:
 
 创建一个 sa 账号 `kubectl create sa jenkins-k8s-sa -n jenkins-k8s`
 
-把sa 账号做 rbac 授权 `kubectl create clusterrolebinding jenkins-k8s-sa-cluster -- clusterrole=cluster-admin --serviceaccount=jenkins-k8s:jenkins-k8s-sa`
+把sa 账号做 rbac 授权
+
+```sh
+kubectl create clusterrolebinding jenkins-k8s-sa-cluster \
+  --clusterrole=cluster-admin \
+  --serviceaccount=jenkins-k8s:jenkins-k8s-sa
+```
+
+目的：让 Jenkins Pod 使用 `jenkins-k8s-sa` 这个账号，并拥有整个 Kubernetes 集群的完全控制权限
+
+
 
 创建 Jenkins Deployment + Service
 
 ```yaml
 # jenkins-deployment.yaml
-apiVersion: apps/v1
+apiVersion: v1
 kind: Deployment
 metadata:
   name: jenkins
@@ -412,7 +445,8 @@ spec:
       serviceAccpont: jenkins-k8s-sa
       containers:
       - name: jenkins
-        image: jenkins/jenkins:lts
+        image: docker.io/jenkins/jenkins:lts
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
           name: web
@@ -434,14 +468,20 @@ kind: Service
 metadata:
   name: jenkins
   namespace: jenkins-k8s
+  labels:
+    app: jenkins
 spec:
+  selector: 
+    app: jenkins
   type: NodePort
   ports:
-    - port: 8080
-      targetPort: 8080
-      nodePort: 30080  # 可通过任意节点IP:30080 访问 Jenkins
-  selector:
-    app: jenkins
+    - name: web
+      port: 8080 
+      targetPort: web
+      nodePort: 30088  # 可通过任意节点IP:30080 访问 Jenkins
+    - name: agent
+      port: 5000
+      targetPort: agent
 
 ```
 
