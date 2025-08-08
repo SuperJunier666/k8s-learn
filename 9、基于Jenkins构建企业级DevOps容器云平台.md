@@ -486,3 +486,270 @@ spec:
 ```
 
 然后通过http://ip:30088/访问
+
+#### 5.4 配置k8s 基于 containerd 从 harbor 镜像仓库找镜像运行 pod
+
+对每一个节点机器，都需要修改`/etc/containerd/config.toml`文件，如下
+
+```ABAP
+[plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = ""
+
+      [plugins."io.containerd.grpc.v1.cri".registry.auths]
+
+      [plugins."io.containerd.grpc.v1.cri".registry.configs]
+
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.1.12.10".tls]
+                 insecure_skip_verify = true
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.1.12.10".auth]
+                username = "admin"
+                password = "Harbor12345"
+      [plugins."io.containerd.grpc.v1.cri".registry.headers]
+
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+        [plugins."io.containerd.grpc.v1.cri".registry_mirrors."10.1.12.10"]
+                endpoint = ["https://10.1.12.10:443"]
+        [plugins."io.containerd.grpc.v1.cri".registry_mirrors."docker.io"]
+                endpoint = ["https://docker.1ms.run", "https://registry.docker-cn.com"]
+```
+
+修改完成之后重启containerd
+
+```sh
+systemctl restart containerd
+```
+
+创建服务尝试拉镜像
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginxweb # 部署的名称
+spec:
+  replicas: 2  # 设置副本数量为2
+  selector:
+    matchLabels:
+      app: nginxweb1 # 用于选择匹配的Pod标签
+  template:
+    metadata:
+      labels:
+        app: nginxweb1 # Pod的标签
+    spec:
+      containers:
+      - name: nginxwebc # 容器名称
+        image: harbor.cn/library/nginx:v1 # 镜像拉取地址，换成阿里云的，不然会拉取失败
+        imagePullPolicy: IfNotPresent # 镜像拉取策略，如果本地没有就拉取
+        ports:
+        - containerPort: 80 # 容器内部监听的端口
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginxweb-service # 服务的名称
+spec:
+  externalTrafficPolicy: Cluster # 外部流量策略设置为集群
+  selector:
+    app: nginxweb1 # 用于选择匹配的Pod标签
+  ports:
+  - protocol: TCP # 使用TCP协议
+    port: 80 # 服务暴露的端口
+    targetPort: 80 # Pod中容器的端口
+    nodePort: 30079 # 在每个Node上分配的端口，用于外部访问
+  type: NodePort # 服务类型，使用NodePort
+```
+
+成功从harbor上拉取镜像
+
+<img src="./k8s/image-20250807153212642.png" alt="image-20250807153212642" style="zoom:80%;" />
+
+harbor日志
+
+![image-20250807153434583](./k8s/image-20250807153434583.png)
+
+#### 5.5测试jenkins的CI/CD
+
+##### 5.5.1 登录harbor，创建一个项目，名为jenkins-demo
+
+##### 5.5.2 在Jenkins 中安装kubernetes 插件
+
+(1)在jenkins 中安装k8s插件
+Manage Jnekins------>插件管理------>可选插件------>搜索kubernetes------>出现如下
+
+![image-20250807154421562](./k8s/image-20250807154421562.png)
+
+安装后重启jenkins
+
+（2)配置jenkins连接k8s集群
+
+访问http://IP:30088/configureClouds，或者点击系统管理------>Clouds，进入以下界面
+
+![image-20250807155009913](./k8s/image-20250807155009913.png)
+
+​	点击New cloud，填写信息
+
+<img src="./k8s/image-20250807155214465.png" alt="image-20250807155214465" style="zoom:67%;" />
+
+点击创建，继续填写信息
+
+<img src="./k8s/image-20250807155542343.png" alt="image-20250807155542343" style="zoom:80%;" />
+
+填写命名空间，然后测试与集群的连接
+
+<img src="./k8s/image-20250807155636344.png" alt="image-20250807155636344" style="zoom:80%;" />
+
+配置jenkins服务地址
+
+<img src="./k8s/image-20250807155924148.png" alt="image-20250807155924148" style="zoom:80%;" />
+
+
+
+保存，然后点击名称继续配置pod模板
+
+<img src="./k8s/image-20250807160154937.png" alt="image-20250807160154937" style="zoom:80%;" />
+
+配置信息
+
+<img src="./k8s/image-20250807172201020.png" alt="image-20250807172201020" style="zoom:80%;" />
+
+容器信息如下：
+
+<img src="./k8s/image-20250807172457492.png" alt="image-20250807172457492" style="zoom:80%;" />
+
+配置SA
+
+<img src="./k8s/image-20250807172611294.png" alt="image-20250807172611294" style="zoom:80%;" />
+
+配置存储卷
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 附： 将10.1.12.10作为docker服务器
+
+k8s节点不装docker，节点通过 TCP 连接远程 Docker Daemon
+
+#### 1、生成 TLS 证书（自签名）
+
+在10.1.12.10上生成服务器私钥和证书请求（CSR）：
+
+```sh
+cd /data/cert
+openssl genrsa -out docker-key.pem 3072
+openssl req -new -key docker-key.pem -out docker.csr -subj "/CN=harbor.cn"
+```
+
+生成服务器证书（用 CA 签名）**必须在证书里使用 SAN (Subject Alternative Name)** 才能被验证通过：
+
+​	创建一个 `extfile.cnf` 文件（告诉 openssl 添加 SAN）：
+
+```sh
+cat > extfile.cnf <<EOF
+subjectAltName = DNS:harbor.cn,IP:192.168.1.100
+EOF
+```
+
+- `DNS:harbor.cn` 是你访问 Docker 守护进程时用的域名
+- `IP:10.1.12.10` 是远程 Docker 守护进程的 IP
+
+```sh
+openssl x509 -req -in docker.csr   -CA ca.pem -CAkey ca.key -CAcreateserial   -out docker-cert.pem -days 3650 -sha256   -extfile extfile.cnf
+```
+
+生成客户端私钥和证书请求：
+
+```sh
+openssl genrsa -out client-key.pem 3072
+openssl req -new -key client-key.pem -out client.csr -subj "/CN=client"
+```
+
+生成客户端证书（用 CA 签名）：
+
+```sh
+openssl x509 -req -in client.csr -CA ca.pem -CAkey ca.key -CAcreateserial -out client-cert.pem -days 3650 -sha256
+```
+
+#### 2、配置 Docker 守护进程使用证书
+
+把生成的证书放到目录，比如 `/etc/docker/cert/` 下,然后编辑 `/etc/docker/daemon.json`：
+
+```json
+{
+  "hosts": ["unix:///var/run/docker.sock", "tcp://0.0.0.0:2376"],
+  "tls": true,
+  "tlsverify": true,
+  "tlscacert": "/data/cert/ca.pem",
+  "tlscert": "/etc/docker/cert/docker-cert.pem",
+  "tlskey": "/etc/docker/cert/docker-key.pem"
+}
+```
+
+然后找到`/usr/lib/systemd/system/docker.service`,将其中的`ExecStart=/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock`修改成`ExecStart=/usr/bin/dockerd`
+
+重启 Docker 服务：
+
+```sh
+systemctl daemon-reload
+systemctl restart docker
+```
+
+#### 3.在k8s节点上操作docker
+
+将`ca.pem`，`client-cert.pem`，`client-key.pem`拷贝到k8s节点的/etc/docker/cert目录下
+
+```sh
+curl --cacert /etc/docker/cert/ca.pem --cert /etc/docker/cert/client-cert.pem --key /etc/docker/cert/client-key.pem https://harbor.cn:2376/version
+```
+
+<img src="./k8s/image-20250808155238412.png" alt="image-20250808155238412" style="zoom:80%;" />
+
+然后再k8s节点上装docker cli
+
+```sh
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+yum install docker-ce-cli
+```
+
+执行docker命令
+
+```sh
+docker --tlsverify   --tlscacert=/etc/docker/cert/ca.pem   --tlscert=/etc/docker/cert/client-cert.pem   --tlskey=/etc/docker/cert/client-key.pem   -H=tcp://harbor.cn:2376 images
+```
+
+<img src="./k8s/image-20250808164103621.png" alt="image-20250808164103621" style="zoom:80%;" />
+
+配置环境变量，可以是
+
+```
+export DOCKER_CA_CERT="/etc/docker/cert/ca.pem" 
+export DOCKER_CLIENT_CERT="/etc/docker/cert/client-cert.pem" 
+export DOCKER_CLIENT_KEY="/etc/docker/cert/client-key.pem"
+```
+
