@@ -722,10 +722,18 @@ systemctl restart docker
 
 #### 3.在k8s节点上操作docker
 
-将`ca.pem`，`client-cert.pem`，`client-key.pem`拷贝到k8s节点的/etc/docker/cert目录下
+将`ca.pem`，`client-cert.pem`，`client-key.pem`拷贝到k8s节点的/etc/docker/cert目录下，
+
+**并且需要`client-cert.pem`，`client-key.pem`重命名为`cert.pem`，`key.pem`。这里的 `client-cert.pem` 和 `client-key.pem` 不符合 Docker 的标准命名（应该是 `cert.pem` 和 `key.pem`）。环境变量模式下，Docker CLI 找不到 cert.pem 和 key.pem，因此必须修改**。
 
 ```sh
-curl --cacert /etc/docker/cert/ca.pem --cert /etc/docker/cert/client-cert.pem --key /etc/docker/cert/client-key.pem https://harbor.cn:2376/version
+cd /etc/docker/cert
+mv client-cert.pem cert.pem
+mv client-key.pem key.pem
+```
+
+```sh
+curl --cacert /etc/docker/cert/ca.pem --cert /etc/docker/cert/cert.pem --key /etc/docker/cert/key.pem https://harbor.cn:2376/version
 ```
 
 <img src="./k8s/image-20250808155238412.png" alt="image-20250808155238412" style="zoom:80%;" />
@@ -740,16 +748,27 @@ yum install docker-ce-cli
 执行docker命令
 
 ```sh
-docker --tlsverify   --tlscacert=/etc/docker/cert/ca.pem   --tlscert=/etc/docker/cert/client-cert.pem   --tlskey=/etc/docker/cert/client-key.pem   -H=tcp://harbor.cn:2376 images
+docker --tlsverify   --tlscacert=/etc/docker/cert/ca.pem   --tlscert=/etc/docker/cert/cert.pem   --tlskey=/etc/docker/cert/key.pem   -H=tcp://harbor.cn:2376 images
 ```
 
 <img src="./k8s/image-20250808164103621.png" alt="image-20250808164103621" style="zoom:80%;" />
 
 配置环境变量，可以是
 
-```
-export DOCKER_CA_CERT="/etc/docker/cert/ca.pem" 
-export DOCKER_CLIENT_CERT="/etc/docker/cert/client-cert.pem" 
-export DOCKER_CLIENT_KEY="/etc/docker/cert/client-key.pem"
+```sh
+export DOCKER_TLS_VERIFY=1
+export DOCKER_CERT_PATH=/path/to/cert/directory
+export DOCKER_HOST=tcp://harbor.cn:2376
 ```
 
+或者在 `~/.bashrc` 文件中添加以上内容，然后使其生效
+
+```sh
+source ~/.bashrc
+```
+
+使用`env | grep DOCKER`查看是否正常加载
+
+这样就可以正常操作了
+
+<img src="./k8s/image-20250811144816885.png" alt="image-20250811144816885" style="zoom:80%;" />
