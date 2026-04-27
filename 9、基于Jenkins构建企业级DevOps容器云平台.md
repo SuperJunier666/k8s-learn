@@ -342,6 +342,8 @@ docker push harbor.cn/library/REPOSITORY[:TAG]
 
 <img src="./k8s/image-20250806105250280.png" alt="image-20250806105250280" style="zoom: 67%;" />
 
+
+
 ### 5、Jenkins+k8s+Git 构建企业级 DevOps 自动化容器云平台
 
 #### 5.1 安装Jenkins
@@ -492,26 +494,31 @@ spec:
 对每一个节点机器，都需要修改`/etc/containerd/config.toml`文件，如下
 
 ```ABAP
-[plugins."io.containerd.grpc.v1.cri".registry]
-      config_path = ""
-
-      [plugins."io.containerd.grpc.v1.cri".registry.auths]
-
-      [plugins."io.containerd.grpc.v1.cri".registry.configs]
-
-        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.1.12.10".tls]
-                 insecure_skip_verify = true
-        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.1.12.10".auth]
-                username = "admin"
-                password = "Harbor12345"
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
       [plugins."io.containerd.grpc.v1.cri".registry.headers]
-
-      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-        [plugins."io.containerd.grpc.v1.cri".registry_mirrors."10.1.12.10"]
-                endpoint = ["https://10.1.12.10:443"]
-        [plugins."io.containerd.grpc.v1.cri".registry_mirrors."docker.io"]
-                endpoint = ["https://docker.1ms.run", "https://registry.docker-cn.com"]
 ```
+
+**问题**：ctr pull harbor.cn/library/REPOSITORY[:TAG]可以，但是配到yaml里就拉不了呢
+
+```sh
+#两条路径完全不同：
+ctr pull 默认“不走认证体系
+
+k8s pod pull
+  → kubelet
+  → CRI（containerd-shim）
+  → containerd
+  →  credential provider
+```
+
+在 `[plugins."io.containerd.grpc.v1.cri".registry.configs]` 下方，是否配置了针对 `harbor.cn` 的认证信息或 `ca_file`（如果是自签名证书）
+
+<img src="k8s/image-20260417151141247-1776409907379-1.png" alt="image-20260417151141247" style="zoom: 50%;" />
+
+确保 Harbor 的 CA 证书已放入节点的 /etc/docker/certs.d/ 或 /etc/containerd/certs.d/ 目录下。
+
+<img src="k8s/image-20260417151241969.png" alt="image-20260417151241969" style="zoom:50%;" />
 
 修改完成之后重启containerd
 
@@ -620,31 +627,154 @@ Manage Jnekins------>插件管理------>可选插件------>搜索kubernetes-----
 
 <img src="./k8s/image-20250807172611294.png" alt="image-20250807172611294" style="zoom:80%;" />
 
+连接docker（见附）
+
+<img src="k8s/image-20260420101619448.png" alt="image-20260420101619448" style="zoom:50%;" />
+
 配置存储卷
 
+![image-20260417162739154](k8s/image-20260417162739154-1776414465199-5.png)
+
+添加harbor凭据
+
+![image-20260417163521125](k8s/image-20260417163521125.png)
+
+测试通过Jenkins发布代码到k8s开发环境、测试环境、生产环境在k8s的控制节点创建名称空间:
+
+```bash
+kubectl create ns dev
+kubectl create ns qa
+kubectl create ns prod
+```
+
+Jenkins首页新建任务
+
+![image-20260417165626177](k8s/image-20260417165626177.png)
+
+添加pipeline
+
+```sh
+pipeline {
+    agent { label 'testhan' }
+
+    environment {
+        // 1. 定义 Harbor 地址和镜像完整路径
+        REGISTRY_URL = "10.1.12.10"
+        IMAGE_PROJECT = "library" 
+        IMAGE_NAME = "jenkins-demo"
+        // 2. 引用凭据 ID
+        HARBOR_CREDS_ID = "dockerharbor"
+    }
+
+    stages {
+        stage('Clone & Prepare') {
+            steps {
+                echo "1. Clone Stage"
+                git url: "https://gitee.com/superxccccc/jenkins-sample"
+                script {
+                    // 获取短 Commit ID 作为镜像 Tag
+                    env.build_tag = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+                    echo "Current Build Tag: ${env.build_tag}"
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps {
+                echo "2. Build Docker Image Stage"
+                // 使用变量拼接完整的镜像名称：harbor.cn/library/jenkins-demo:tag
+                sh "docker build -t ${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag} ."
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                echo "3. Push Docker Image Stage"
+                // 动态引用 environment 中定义的凭据 ID
+                withCredentials([usernamePassword(credentialsId: "${HARBOR_CREDS_ID}", 
+                                                 passwordVariable: 'dockerHubPassword', 
+                                                 usernameVariable: 'dockerHubUser')]) {
+                    sh "docker login ${REGISTRY_URL} -u ${dockerHubUser} -p ${dockerHubPassword}"
+                    sh "docker push ${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag}"
+                }
+            }
+        }
+
+        stage('Deploy to Dev') {
+            steps {
+                echo "4. Deploy DEV Environment"
+                // 使用 sed 替换 YAML 里的镜像地址
+                script {
+                    def fullImageName = "${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag}"
+                    sh "sed -i '/image:/ s|<BUILD_TAG>|${env.build_tag}|g' k8s-dev-harbor.yaml"
+                }
+                sh "kubectl apply -f k8s-dev-harbor.yaml --validate=false"
+            }
+        }
+
+        stage('Promote to QA') {
+            input {
+                message "Promote to QA?"
+                ok "Confirm"
+                parameters {
+                    choice(name: 'CONFIRM', choices: ['YES', 'NO'], description: 'Select YES to deploy to QA')
+                }
+            }
+            steps {
+                script {
+                    if (params.CONFIRM == "YES") {
+                        echo "Deploying to QA..."
+                        def fullImageName = "${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag}"
+                        sh "sed -i '/image:/ s|<BUILD_TAG>|${env.build_tag}|g' k8s-qa-harbor.yaml"
+                        sh "kubectl apply -f k8s-qa-harbor.yaml --validate=false"
+                        sh "sleep 6 && kubectl get pods -n qatest"
+                    }
+                }
+            }
+        }
+
+        stage('Promote to Pro') {
+            input {
+                message "Promote to Pro?"
+                ok "Confirm"
+                parameters {
+                    choice(name: 'CONFIRM', choices: ['YES', 'NO'], description: 'Select YES to deploy to Production')
+                }
+            }
+            steps {
+                script {
+                    if (params.CONFIRM == "YES") {
+                        echo "Deploying to Production..."
+                        def fullImageName = "${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag}"
+                        sh "sed -i '/image:/ s|<BUILD_TAG>|${env.build_tag}|g' k8s-prod-harbor.yaml"
+                        sh "kubectl apply -f k8s-pro-harbor.yaml"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Pipeline Work Finished."
+        }
+        success {
+            // 成功后清理本地镜像，防止磁盘满
+            sh "docker rmi ${REGISTRY_URL}/${IMAGE_PROJECT}/${IMAGE_NAME}:${env.build_tag} || true"
+        }
+    }
+}
+```
+
+执行构建（jenkins-agent的容器需要包含docker-cli，见附）
 
 
 
+开发环境构建成功
 
+![image-20260427155616938](k8s/image-20260427155616938.png)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+修改源码后，重新构建镜像（源码不动重新执行则不变）
 
 
 
@@ -772,3 +902,47 @@ source ~/.bashrc
 这样就可以正常操作了
 
 <img src="./k8s/image-20250811144816885.png" alt="image-20250811144816885" style="zoom:80%;" />
+
+
+
+inbound-agent镜像打包cli工具
+
+```dockerfile
+FROM harbor.cn/library/inbound-agent:jdk21
+
+# 切换到 root 以执行安装命令
+USER root
+
+# 1. 更新 apt 源为阿里云，并安装所有基础工具（curl, gnupg, certificates）
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources || \
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
+    apt-get update && \
+    apt-get install -y curl ca-certificates gnupg && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. 安装 Docker CLI (使用二进制方式，最稳)
+RUN curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/static/stable/x86_64/docker-24.0.7.tgz | tar xvz && \
+    mv docker/docker /usr/local/bin/ && \
+    rm -rf docker
+
+# 3. 安装 kubectl (使用 apt 方式，修正了 /usr/share 路径)
+RUN mkdir -p /usr/share/keyrings && \
+    curl -fsSL https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.28/deb/Release.key | gpg --dearmor -o /usr/share/keyrings/kubernetes-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list && \
+    apt-get update && \
+    apt-get install -y kubectl && \
+    rm -rf /var/lib/apt/lists/*
+
+# 4. 安装 Helm (优先使用华为云镜像二进制，避免脚本连接 GitHub 报错)
+RUN (curl -fsSL https://mirrors.huaweicloud.com/helm/v3.12.3/helm-v3.12.3-linux-amd64.tar.gz | tar xvz && mv linux-amd64/helm /usr/local/bin/ && rm -rf linux-amd64) || \
+    (curl -fsSL https://raw.staticdn.net/helm/helm/main/scripts/get-helm-3 | bash)
+
+# 切换回 jenkins 用户
+USER jenkins
+```
+
+然后push到harbor上
+
+pod模板按照上面配置三个环境变量
+
+<img src="k8s/image-20260420161200514.png" alt="image-20260420161200514" style="zoom: 50%;" />

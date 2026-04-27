@@ -353,7 +353,7 @@ kubectl create ns lucky
 ```
 
 ```sh
-kubectl create rolebinding lucky -n lucky --clusterrole=cluster-acmin --user=lucKy
+kubectl create rolebinding lucky -n lucky --clusterrole=cluster-admin --user=lucKy
 ```
 
 ##### 2.kubernetes-admin默认配置
