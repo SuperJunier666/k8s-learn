@@ -45,8 +45,7 @@ RBAC<span style="color:red">(基于角色的访问控制)</span>是Kubernetes中
 
 ###### 2.2.1 如果用户通过 RoleBinding 绑定到 Role，那么用户只会在该 Role 所在的名称空间中拥有权
 
-![image-20250625172226983](./k8s/image-20250625172226983.png)
-
+![image-20260610102509399](k8s/image-20260610102509399.png)
 ```bash
 kubectl create rolebinding read-pods-binding \      # read-pods-binding：新建的 RoleBinding 名称
   --role=pod-reader \							    # 绑定的角色（Role 或 ClusterRole）
@@ -58,13 +57,13 @@ kubectl create rolebinding read-pods-binding \      # read-pods-binding：新建
 
 ###### 	2.2.2 如果用户通过 RoleBinding 绑定到 ClusterRole，用户仅在 RoleBinding 所在的名称空间中拥有相应的权限。
 
-![image-20250625172417504](./k8s/image-20250625172417504.png)
+![image-20260610102403606](k8s/image-20260610102403606.png)
 
 ###### 	2.2.3 通过 ClusterRoleBinding 绑定ClusterRole
 
 通过 ClusterRoleBinding 将用户绑定到 ClusterRole，用户将在整个集群中拥有相应的权限。
 
-![image-20250625172711038](./k8s/image-20250625172711038.png)
+![image-20260610102201425](k8s/image-20260610102201425.png)
 
 kubernetes-admin（User）可以通过ClusterRoleBinding绑定到ClusterRole上的，根据下面命令查看
 
@@ -325,7 +324,7 @@ openssl x509 -reg -in lucky.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out lu
 (4)指定要访问的 k8s 集群
 
 ```sh
-kubectl conig set-cluster kubernetes --server=https://IP:6443 --insecure-skip-tls-verify=true --kubeconfig=/root/lucky
+kubectl config set-cluster kubernetes --server=https://IP:6443 --insecure-skip-tls-verify=true --kubeconfig=/root/lucky
 ```
 
 (5)把lucky这个用户添加到 lucky 文文件，可以用来认证 apiserver 的连接
