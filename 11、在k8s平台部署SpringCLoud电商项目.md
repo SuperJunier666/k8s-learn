@@ -779,3 +779,185 @@ $$
 | 只写 args          | ENTRYPOINT + args |
 | 只写 command       | command           |
 | command + args     | command + args    |
+
+
+
+## 3、部署微服务项目到 K8s 集群
+
+### 3.1 编译 Java 程序
+
+**获取源码：**
+
+```bash
+git clone <GitLab仓库地址>
+```
+
+克隆完成后修改 `application.yml`，更新数据库连接地址。
+
+**执行编译：**
+
+```bash
+mvn clean package -Dmaven.test.skip=true
+```
+
+| 参数                     | 说明                   |
+| ------------------------ | ---------------------- |
+| `clean package`          | 清理并打包项目         |
+| `-Dmaven.test.skip=true` | 跳过测试阶段，加速编译 |
+
+> 首次编译需下载依赖，耗时约 30 分钟，请保持网络稳定。
+
+**编译结果处理：**
+
+| 状态 | 标志                                                      | 处理方式                                              |
+| ---- | --------------------------------------------------------- | ----------------------------------------------------- |
+| 成功 | 显示 `BUILD SUCCESS` 及总耗时（如 `Total time: 41.555s`） | —                                                     |
+| 失败 | 多因网络问题导致依赖下载不全                              | 重复执行编译命令；多次失败需检查 Maven 配置和网络连接 |
+
+---
+
+### 3.2 镜像打包
+
+**编写 Dockerfile：**
+
+```dockerfile
+FROM java:11-jdk                          # 基于 Alpine Linux 的精简镜像
+
+# 时区设置
+RUN apk add --no-cache tzdata \
+    && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+# 复制应用
+COPY target/eureka-service.jar /app.jar
+
+# 启动命令
+ENTRYPOINT ["java", "-jar", "/app.jar"]
+```
+
+**镜像命名规范：**
+
+```
+harbor.cn/microservice/eureka:v1
+├── harbor.cn        # Harbor 仓库地址
+├── microservice     # 项目名称
+├── eureka           # 服务名称
+└── v1               # 版本标签
+```
+
+**镜像推送：**
+
+```bash
+# 登录 Harbor
+docker login harbor.cn
+
+# 推送镜像
+docker push harbor.cn/microservice/eureka:v1
+```
+
+---
+
+### 3.3 服务部署
+
+**创建步骤：**
+
+```bash
+# 1. 创建命名空间
+kubectl create namespace ms
+# 2. 应用资源定义
+kubectl apply -f eureka.yaml
+```
+
+**域名解析配置（本地 hosts）：**
+
+文件路径：`C:\Windows\System32\drivers\etc\hosts`
+
+```
+192.168.40.64   xxx.xxx.xxx
+```
+
+---
+
+### 3.4 服务注册验证
+
+**Pod 注册格式：**
+
+```
+<pod名称>.xxx.ms.svc.cluster.local:<服务端口>
+```
+
+**验证要点：**
+
+| 检查项   | 说明                                              |
+| -------- | ------------------------------------------------- |
+| 副本数   | 注册数量需与 `replicas` 配置一致                  |
+| 注册 IP  | 实际注册使用 Pod IP，而非 Pod 名称                |
+| 访问方式 | 服务间通过内部域名调用，浏览器无法直接访问 Pod IP |
+
+
+
+## 4.全链路监控系统
+
+全链路监控系统是一种用于监测和管理复杂业务流程的系统，可跟踪整个业务链路中涉及的各个环节与组件，涵盖硬件设备、软件应用、网络连接及数据传输等。
+
+其核心目标是**实时监控整个业务链路**，以便及时发现并解决潜在的问题或故障。系统能够收集和分析性能指标、延迟时间、错误率等多维度数据，支持实时告警，并通过可视化界面帮助用户直观了解业务流程的状态与性能。
+
+## 核心功能
+
+| 功能模块       | 说明                                       |
+| -------------- | ------------------------------------------ |
+| 数据采集与存储 | 全面收集链路中各环节的运行数据并持久化存储 |
+| 监控指标分析   | 对性能、延迟、错误率等关键指标进行多维分析 |
+| 实时告警机制   | 异常发生时即时触发告警，缩短故障响应时间   |
+| 可视化展示界面 | 以图表等形式直观呈现业务链路的实时状态     |
+| 故障排查支持   | 提供链路追踪与日志关联，辅助快速定位根因   |
+
+### 4.1 OpenTelemetry简介
+
+OpenTelemetry（简称 **OTel**）是一个由云原生计算基金会（CNCF）托管的开源可观测性框架，用来统一**分布式追踪（Tracing）+ 指标（Metrics）+ 日志（Logs）**的采集、处理与导出标准。
+
+![image-20260622162823706](k8s/image-20260622162823706.png)
+
+对比图
+
+| 系统          | 定位                  | 特点               |
+| ------------- | --------------------- | ------------------ |
+| OpenTelemetry | 标准 + SDK + 数据管道 | “统一规范”         |
+| Zipkin        | tracing系统           | 轻量但功能单一     |
+| SkyWalking    | APM平台               | Java生态强，功能全 |
+| Pinpoint      | APM（偏Java）         | 字节码强侵入       |
+
+### 4.2 部署OpenTelemetry on Kubernetes
+
+![image-20260622164702772](k8s/image-20260622164702772.png)
+
+OpenTelemetry（OTel）在 K8s 中的监控体系分为三层：**采集层**（SDK/Agent 注入微服务）→ **传输聚合层**（Collector）→ **存储展示层**（Jaeger/Prometheus/Loki/Grafana）。采集的信号包括 Traces（链路追踪）、Metrics（指标）、Logs（日志）。
+
+#### 一、部署步骤
+
+| 组件                           | 部署方式                | 职责                                   |
+| ------------------------------ | ----------------------- | -------------------------------------- |
+| OTel Java Agent                | 以 JVM 参数注入容器     | 无侵入采集 Spring Boot / Dubbo3 Traces |
+| OTel Collector（Agent 模式）   | DaemonSet（每节点一个） | 接收本节点 Pod 数据，减少网络跳数      |
+| OTel Collector（Gateway 模式） | Deployment（2～3 副本） | 集中过滤、批处理、扇出到各后端         |
+| Jaeger                         | Deployment + Service    | 存储和查询 Traces                      |
+| Prometheus                     | StatefulSet             | 存储 Metrics                           |
+| Loki                           | StatefulSet             | 存储 Logs                              |
+| Grafana                        | Deployment              | 统一 Dashboard                         |
+
+#### 二、微服务接入（Spring Boot / Dubbo3 无侵入方案）
+
+**Dockerfile 注入 OTel Java Agent**
+
+```dockerfile
+FROM openjdk:17-jre-slim
+
+# 下载 OTel Java Agent
+ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar /otel/opentelemetry-javaagent.jar
+
+COPY target/your-service.jar /app/app.jar
+
+ENTRYPOINT ["java", \
+  "-javaagent:/otel/opentelemetry-javaagent.jar", \
+  "-jar", "/app/app.jar"]
+```
+
