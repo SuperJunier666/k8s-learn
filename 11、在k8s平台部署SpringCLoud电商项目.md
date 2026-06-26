@@ -1,4 +1,4 @@
-# 十、在k8s平台部署SpringCLoud电商项目.md
+# 十一、在k8s平台部署SpringCLoud电商项目.md
 
 ## 1、准备工作
 
@@ -667,7 +667,7 @@ Spring Cloud 是基于 Spring Boot 的微服务治理框架，提供一整套分
 
 
 
-## 2、准备工作
+## 2、配置计算
 
 ### 2.1生产环境的k8s里部署服务
 
